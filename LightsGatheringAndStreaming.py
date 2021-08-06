@@ -78,7 +78,7 @@ LeftToRight = True
 arduinoPort = ''
 
 #The scale of the image, if we can scale it down
-scale = 1
+scale = 1/8
 
 # number of writes for analytics and fps
 writeCount = 0
@@ -222,14 +222,27 @@ def loop():
         memDC = imgDC.CreateCompatibleDC()
         
         saveBitMap = win32ui.CreateBitmap()
-        saveBitMap.CreateCompatibleBitmap(imgDC, r, numRows)
+        saveBitMap.CreateCompatibleBitmap(imgDC, math.trunc(r * scale), numRows)
         memDC.SelectObject(saveBitMap)
-        memDC.BitBlt((0, 0), (r, b  - (b - numRows)),  imgDC,  (0, b - numRows),  win32con.SRCCOPY)
+
+        #memDC.BitBlt((0,0),
+         #   (r, b - (b - numRows)),
+          #  imgDC,
+           # (0, b - numRows),
+            #win32con.SRCCOPY)
+
+        memDC.StretchBlt((0, 0),
+            (math.trunc(r * scale), math.trunc((b  - (b - (math.floor(numRows)))))),
+            imgDC,
+            (0, b - math.floor(numRows / scale)),
+            (round(w * .5703125), b - (b - math.trunc(numRows / scale))),
+            win32con.SRCCOPY)
 
         signedIntsArray = saveBitMap.GetBitmapBits(True)
         img = np.fromstring(signedIntsArray, dtype='uint8')
-        img.shape = (r, numRows, 4)
+        img.shape = (math.trunc(r * scale), numRows, 4)
         #saveBitMap.SaveBitmapFile(memDC,  'screencapture.bmp')
+        #time.sleep(3)
 
         # Free Resources
         #hDeskDC.DeleteDC()

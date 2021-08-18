@@ -1,5 +1,9 @@
+
+
 import time
 
+#attempted to try using the graphics card to speed up processing, however it seems too bloated and not lightweight for most users.
+#from numba import jit, cuda
 import serial
 #time.sleep(5.5)
 import serial.tools.list_ports
@@ -14,11 +18,13 @@ import sys
 import win32gui,  win32ui,  win32con, win32api
  
 
+
+
 #Method for capturing screen info
 screenCapture = False
 debugging = True
 
-np.set_printoptions(threshold=sys.maxsize)
+#np.set_printoptions(threshold=sys.maxsize)
 #Get bottom 3 rows of display
 monitorRefreshRate = 165
 #Num monitors you currently have connected for calculations
@@ -47,12 +53,12 @@ numLEDS = 30
 #Under the windows native capture, 1 1440p row can be captured at nearly 100fps, and 5 rows at nearly 60 fps
 #10 rows at 40 fps
 #50 rows at about 10 fps
-numRows = 1
+numRows = 10
 
 #The exact locations were going to use for the calculations, so we grab just the pixels we want
 pixelPositioning = positioning.copy()
 pixelPositioning[1, 0] = pixelPositioning[1, 1] - numRows
-print(pixelPositioning)
+#print(pixelPositioning)
 
 
 numSections = numLEDS
@@ -60,7 +66,7 @@ numSections = numLEDS
 #Determines the resolution of the monitor being captured for internal purposes
 resolutionX = (positioning[0,1] - positioning[0,0])
 resolutionY = (positioning[1,1] - positioning[1,0])
-print (resolutionX, resolutionY)
+#print (resolutionX, resolutionY)
 
 #Number of pixels
 totalPixels = numRows * resolutionX
@@ -79,6 +85,8 @@ arduinoPort = ''
 
 #The scale of the image, if we can scale it down
 scale = 1/8
+
+scaledPixelsPerSection = math.trunc(pixelsPerSection * scale)
 
 # number of writes for analytics and fps
 writeCount = 0
@@ -116,18 +124,27 @@ ack = ''
 #whether the device is connected
 deviceNotConnected = True
 
+
+
+start_time = time.time()
+
+print("--- %s seconds ---" % (time.time() - start_time))
+
 #Find the port that the arduino is connected into, and connect to it
 ports = list(serial.tools.list_ports.comports())
 portTestNum = 0
 for p in ports:
+    print(p)
     if "Arduino" in p.description:
-        arduinoPort = p[portTestNum]
+        arduinoPort = p[0]
         try:
+            print("trying")
             arduino = serial.Serial(port=arduinoPort, baudrate=115200, timeout= 10)
             print("connected to device")
             deviceNotConnected = False
             break
-        except:
+        except Exception as e:
+            print(e)
             print("port is currently in use, invalid, or no valid device found, retrying in 5 seconds, trying next port")
             time.sleep(5)
 
@@ -178,7 +195,7 @@ def loop():
     if screenCapture:
         image = PIL.ImageGrab.grab()
         #image.show()
-        #image = image.resize((math.trunc(resolutionX * scale), math.trunc(resolutionY * scale)), PIL.Image.BICUBIC)
+        image = image.resize((math.trunc(resolutionX * scale), math.trunc(resolutionY * scale)), PIL.Image.BICUBIC)
         #for y in range(0, numRows, 1):
             #for x in range(0, math.trunc(resolutionX * scale), 1):
                 #color = image.getpixel((x, math.trunc((resolutionY - 1)) * scale - y))
@@ -232,16 +249,18 @@ def loop():
             #win32con.SRCCOPY)
 
         memDC.StretchBlt((0, 0),
-            (math.trunc(r * scale), math.trunc((b  - (b - (math.floor(numRows)))))),
+            (math.trunc(r * scale), math.trunc(b  - (b - (numRows)))),
             imgDC,
             (0, b - math.floor(numRows / scale)),
-            (round(w * .5703125), b - (b - math.trunc(numRows / scale))),
+            (r, b - (b - math.trunc(numRows / scale))),
             win32con.SRCCOPY)
+        xPixels = math.trunc(r * scale)
 
         signedIntsArray = saveBitMap.GetBitmapBits(True)
         img = np.fromstring(signedIntsArray, dtype='uint8')
         img.shape = (math.trunc(r * scale), numRows, 4)
-        #saveBitMap.SaveBitmapFile(memDC,  'screencapture.bmp')
+        #if writeCount % 1000 == 0:
+            #saveBitMap.SaveBitmapFile(memDC,  'screencapture.bmp')
         #time.sleep(3)
 
         # Free Resources
@@ -287,6 +306,11 @@ def loop():
             #for x in range(0, math.trunc(resolutionX * scale), 1):
                 #color = image[x, math.trunc((resolutionY - 1) * scale) - y]
         pixelArray = np.asarray(image)
+        pixelsArea = pixelArray[resolutionY - numRows : resolutionY, :, :]
+        #print(pixelsArea.shape)
+        #print(pixelsArea)
+        pixelsArea = pixelsArea.flatten()
+        pixelsArea = pixelsArea.reshape((-1,3))
 
     #t0 = time.process_time()
     #print(t0)
@@ -319,14 +343,24 @@ def loop():
             #pixelColor += 1
             #avgColorArray[(math.trunc(pixelColor / math.trunc(pixelsPerSection * scale)) % numSections) * 3] = avgColorArray[(math.trunc(pixelColor / math.trunc(pixelsPerSection * scale)) % numSections) * 3] + pixel[0]
         else:
-            index = (math.trunc(pixelColor / math.trunc(pixelsPerSection * scale)) % numSections)
-            avgColorArray[index * 3] = avgColorArray[index * 3] + pixel[0]
-            avgColorArray[index * 3 + 1] = avgColorArray[index * 3 + 1] + pixel[1]
-            avgColorArray[index * 3 + 2] = avgColorArray[index * 3 + 2] + pixel[2]
-            pixelColor += 1
+            if debugging:
+                if (numLEDS) * pixelsPerSection * scale > math.floor(pixelColor / (pixelsPerSection * scale)):
+                    
+                    index = math.floor((pixelColor % (xPixels))  / (xPixels / numLEDS) )
+                    #print("putting pixelNum " + str(pixelColor) + "at index " + str(index))
+                    avgColorArray[index * 3] = avgColorArray[index * 3] + pixel[0]
+                    avgColorArray[index * 3 + 1] = avgColorArray[index * 3 + 1] + pixel[1]
+                    avgColorArray[index * 3 + 2] = avgColorArray[index * 3 + 2] + pixel[2]
+                    pixelColor += 1
+                else:
+                    pixelColor += 1
+                #print("putting pixelNum " + str(pixelColor) + "at index " + str(index))
+            #index = (math.trunc(pixelColor / math.trunc(pixelsPerSection * scale)) % numSections)
+            
             #numPixel += 1
     #print(avgColorArray)
     #print(pixelsAreaChecker)
+    #time.sleep(1)
 
     #For each of the average colors, divide it by the number of pixels in the section, move it into the pixelAvgArray, and then convert it to bytes in our pixelBytes array
     for avgColor in range((max(0, horizontalOffset)) + 6, (len(avgColorArray) - abs(horizontalOffset)) + 6, 1):
@@ -334,13 +368,15 @@ def loop():
         #print(pixelAvgArray)
         pixelBytes += (pixelAvgArray[avgColor - 6].to_bytes(1, 'big'))
         #print(str(pixelAvgArray[avgColor - 6]) + ' at ' + str(avgColor - 6))
-
     #write out debugging information every 10 frames processed, as its easier to look at if you have little changing on the screen
-    if (writeCount % 10 == 0):
+    if (writeCount % 1000 == 0):
         #print(avgColorArray)
         #print(pixelAvgArray)
         #print(len(pixelAvgArray))
         print(writeCount)
+        print("--- %s seconds ---" % (time.time() - start_time))
+        print (str(writeCount / (time.time() - start_time)) + " FPS")
+        print( str((writeCount * numRows * resolutionX * scale) / (time.time() - start_time)) + " Pixels Processed Per Second")
 
 
     #print(pixelBytes)
